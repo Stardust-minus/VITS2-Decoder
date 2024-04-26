@@ -42,7 +42,6 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = (
     True  # If encontered training problem,please try to disable TF32.
 )
-torch.set_num_threads(1)
 torch.set_float32_matmul_precision("medium")
 torch.backends.cuda.sdp_kernel("flash")
 torch.backends.cuda.enable_flash_sdp(True)
@@ -202,23 +201,11 @@ def run():
         print("Using normal encoder for VITS1")
 
     net_g = SynthesizerTrn(
-        len(symbols),
         hps.data.filter_length // 2 + 1,
         hps.train.segment_size // hps.data.hop_length,
         n_speakers=hps.data.n_speakers,
-        mas_noise_scale_initial=mas_noise_scale_initial,
-        noise_scale_delta=noise_scale_delta,
         **hps.model,
     ).cuda(local_rank)
-
-    if getattr(hps.train, "freeze_ZH_bert", False):
-        print("Freezing ZH bert encoder !!!")
-        for param in net_g.enc_p.bert_proj.parameters():
-            param.requires_grad = False
-    if getattr(hps.train, "freeze_emo", False):
-        print("Freezing emo vq !!!")
-        for param in net_g.enc_p.emo_vq.parameters():
-            param.requires_grad = False
 
     net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(local_rank)
     optim_g = torch.optim.AdamW(
@@ -434,17 +421,12 @@ def train_and_evaluate(
     if net_wd is not None:
         net_wd.train()
     for batch_idx, (
-        x,
-        x_lengths,
+        mel_feature,
+        feature_lengths,
         spec,
         spec_lengths,
         y,
         y_lengths,
-        speakers,
-        tone,
-        language,
-        bert,
-        emo,
     ) in enumerate(tqdm(train_loader)):
         if net_g.module.use_noise_scaled_mas:
             current_mas_noise_scale = (
@@ -452,7 +434,7 @@ def train_and_evaluate(
                 - net_g.module.noise_scale_delta * global_step
             )
             net_g.module.current_mas_noise_scale = max(current_mas_noise_scale, 0.0)
-        x, x_lengths = x.cuda(local_rank, non_blocking=True), x_lengths.cuda(
+        mel_feature, feature_lengths = mel_feature.cuda(local_rank, non_blocking=True), feature_lengths.cuda(
             local_rank, non_blocking=True
         )
         spec, spec_lengths = spec.cuda(
@@ -461,34 +443,19 @@ def train_and_evaluate(
         y, y_lengths = y.cuda(local_rank, non_blocking=True), y_lengths.cuda(
             local_rank, non_blocking=True
         )
-        speakers = speakers.cuda(local_rank, non_blocking=True)
-        tone = tone.cuda(local_rank, non_blocking=True)
-        language = language.cuda(local_rank, non_blocking=True)
-        bert = bert.cuda(local_rank, non_blocking=True)
-        emo = emo.cuda(local_rank, non_blocking=True)
 
         with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
             (
                 y_hat,
-                l_length,
-                attn,
                 ids_slice,
                 x_mask,
                 z_mask,
                 (z, z_p, m_p, logs_p, m_q, logs_q),
-                (hidden_x, logw, logw_),  # , logw_sdp),
-                g,
-                loss_commit,
             ) = net_g(
-                x,
-                x_lengths,
+                mel_feature,
+                feature_lengths,
                 spec,
                 spec_lengths,
-                speakers,
-                tone,
-                language,
-                bert,
-                emo,
             )
             mel = spec_to_mel_torch(
                 spec,
@@ -579,7 +546,6 @@ def train_and_evaluate(
                 loss_lm = wl(y.detach().squeeze(), y_hat.squeeze()).mean()
                 loss_lm_gen = wl.generator(y_hat.squeeze())
             with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
-                loss_dur = torch.sum(l_length.float())
                 loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
                 loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
 
@@ -587,7 +553,7 @@ def train_and_evaluate(
                 loss_gen, losses_gen = generator_loss(y_d_hat_g)
                 # loss_commit = loss_commit * hps.train.c_commit
 
-                loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl + loss_commit * hps.train.c_commit
+                loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl
                 if net_dur_disc is not None:
                     loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g)
                     loss_gen_all += (
@@ -607,7 +573,7 @@ def train_and_evaluate(
         if rank == 0:
             if global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]["lr"]
-                losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl]
+                losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_kl]
                 logger.info(
                     "Train Epoch: {} [{:.0f}%]".format(
                         epoch, 100.0 * batch_idx / len(train_loader)
@@ -626,9 +592,7 @@ def train_and_evaluate(
                     {
                         "loss/g/fm": loss_fm,
                         "loss/g/mel": loss_mel,
-                        "loss/g/dur": loss_dur,
                         "loss/g/kl": loss_kl,
-                        "loss/g/commit": loss_commit
                     }
                 )
                 scalar_dict.update(
@@ -683,9 +647,6 @@ def train_and_evaluate(
                     ),
                     "all/mel": utils.plot_spectrogram_to_numpy(
                         mel[0].data.cpu().numpy()
-                    ),
-                    "all/attn": utils.plot_alignment_to_numpy(
-                        attn[0, 0].data.cpu().numpy()
                     ),
                 }
                 utils.summarize(
@@ -750,38 +711,22 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     print("Evaluating ...")
     with torch.no_grad():
         for batch_idx, (
-            x,
-            x_lengths,
+            mel_feature,
+            feature_lengths,
             spec,
             spec_lengths,
             y,
             y_lengths,
-            speakers,
-            tone,
-            language,
-            bert,
-            emo,
         ) in enumerate(eval_loader):
-            x, x_lengths = x.cuda(), x_lengths.cuda()
+            mel_feature, feature_lengths = mel_feature.cuda(), feature_lengths.cuda()
             spec, spec_lengths = spec.cuda(), spec_lengths.cuda()
             y, y_lengths = y.cuda(), y_lengths.cuda()
-            speakers = speakers.cuda()
-            bert = bert.cuda()
-            tone = tone.cuda()
-            language = language.cuda()
-            emo = emo.cuda()
             for use_sdp in [True, False]:
-                y_hat, attn, mask, *_ = generator.module.infer(
-                    x,
-                    x_lengths,
-                    speakers,
-                    tone,
-                    language,
-                    bert,
-                    emo,
-                    y=spec,
-                    max_len=1000,
-                    sdp_ratio=0.0 if not use_sdp else 1.0,
+                y_hat, mask, *_ = generator.module.infer(
+                    mel_feature,
+                    feature_lengths,
+                    spec,
+                    spec_lengths
                 )
                 y_hat_lengths = mask.sum([1, 2]).long() * hps.data.hop_length
 
@@ -812,7 +757,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 )
                 audio_dict.update(
                     {
-                        f"gen/audio_{batch_idx}_{use_sdp}": y_hat[
+                        f"gen/audio_{batch_idx}": y_hat[
                             0, :, : y_hat_lengths[0]
                         ]
                     }
