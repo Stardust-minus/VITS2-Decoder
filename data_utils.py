@@ -37,14 +37,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.use_mel_spec_posterior:
             self.n_mel_channels = getattr(hparams, "n_mel_channels", 80)
 
-        self.cleaned_text = getattr(hparams, "cleaned_text", False)
-
-        self.add_blank = hparams.add_blank
-        self.min_text_len = getattr(hparams, "min_text_len", 1)
-        self.max_text_len = getattr(hparams, "max_text_len", 384)
-        self.empty_emo = torch.squeeze(
-            torch.load("empty_emo.npy", map_location="cpu"), dim=1
-        )
 
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
@@ -62,44 +54,22 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         lengths = []
         skipped = 0
         logger.info("Init dataset...")
-        for _id, spk, language, text, phones, tone, word2ph in tqdm(
+        for audiopath, _, _, _ in tqdm(
             self.audiopaths_sid_text
         ):
-            audiopath = f"{_id}"
-            if self.min_text_len <= len(phones) and len(phones) <= self.max_text_len:
-                phones = phones.split(" ")
-                tone = [int(i) for i in tone.split(" ")]
-                word2ph = [int(i) for i in word2ph.split(" ")]
-                audiopaths_sid_text_new.append(
-                    [audiopath, spk, language, text, phones, tone, word2ph]
-                )
+            # audiopath = f"{_id}"
+            mel_feature_path = audiopath.replace(".wav", ".pt")
+            audiopaths_sid_text_new.append([audiopath, mel_feature_path])
                 lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
-            else:
-                skipped += 1
-        logger.info(
-            "skipped: "
-            + str(skipped)
-            + ", total: "
-            + str(len(self.audiopaths_sid_text))
-        )
         self.audiopaths_sid_text = audiopaths_sid_text_new
         self.lengths = lengths
 
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         # separate filename, speaker_id and text
-        audiopath, sid, language, text, phones, tone, word2ph = audiopath_sid_text
-
-        bert, phones, tone, language = self.get_text(
-            text, word2ph, phones, tone, language, audiopath
-        )
-
+        audiopath, mel_feature_path = audiopath_sid_text
         spec, wav = self.get_audio(audiopath)
-        sid = torch.LongTensor([int(self.spk_map[sid])])
-        emo = torch.squeeze(
-            torch.load(audiopath.replace(".wav", ".emo.pt"), map_location="cpu"),
-            dim=1,
-        )
-        return (phones, spec, wav, sid, tone, language, bert, emo)
+        mel_feature = torchaudio.load(mel_feature_path)
+        return (spec, wav, mel_feature)
 
     def get_audio(self, filename):
         audio, sampling_rate = load_wav_to_torch(filename)
@@ -143,27 +113,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 torch.save(spec, spec_filename)
         return spec, audio_norm
 
-    def get_text(self, text, word2ph, phone, tone, language_str, wav_path):
-        phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str)
-        if self.add_blank:
-            phone = commons.intersperse(phone, 0)
-            tone = commons.intersperse(tone, 0)
-            language = commons.intersperse(language, 0)
-            for i in range(len(word2ph)):
-                word2ph[i] = word2ph[i] * 2
-            word2ph[0] += 1
-        bert_path = wav_path.replace(".wav", ".bert.pt")
-        bert = torch.load(bert_path)
-        assert bert.shape[-1] == len(phone)
-        phone = torch.LongTensor(phone)
-        tone = torch.LongTensor(tone)
-        language = torch.LongTensor(language)
-        return bert, phone, tone, language
-
-    def get_sid(self, sid):
-        sid = torch.LongTensor([int(sid)])
-        return sid
-
     def __getitem__(self, index):
         return self.get_audio_text_speaker_pair(self.audiopaths_sid_text[index])
 
@@ -187,77 +136,61 @@ class TextAudioSpeakerCollate:
         _, ids_sorted_decreasing = torch.sort(
             torch.LongTensor([x[1].size(1) for x in batch]), dim=0, descending=True
         )
+        
+        max_spec_len = max([x[0].size(1) for x in batch])
+        max_wav_len = max([len(x[1]) for x in batch])
+        max_mel_feature_len = max([x[2].size(2) for x in batch])
 
-        max_text_len = max([len(x[0]) for x in batch])
-        max_spec_len = max([x[1].size(1) for x in batch])
-        max_wav_len = max([x[2].size(1) for x in batch])
-
-        text_lengths = torch.LongTensor(len(batch))
+        # text_lengths = torch.LongTensor(len(batch))
         spec_lengths = torch.LongTensor(len(batch))
         wav_lengths = torch.LongTensor(len(batch))
-        sid = torch.LongTensor(len(batch))
+        mel_feature_lengths = torch.LongTensor(len(batch))
+        # sid = torch.LongTensor(len(batch))
 
-        text_padded = torch.LongTensor(len(batch), max_text_len)
-        tone_padded = torch.LongTensor(len(batch), max_text_len)
-        language_padded = torch.LongTensor(len(batch), max_text_len)
-        bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
+        # text_padded = torch.LongTensor(len(batch), max_text_len)
+        # tone_padded = torch.LongTensor(len(batch), max_text_len)
+        # language_padded = torch.LongTensor(len(batch), max_text_len)
+        # bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
         # en_bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
-        emo = torch.FloatTensor(len(batch), 512)
+        # emo = torch.FloatTensor(len(batch), 512)
 
-        spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
+        spec_padded = torch.FloatTensor(len(batch), batch[0][0].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
-        text_padded.zero_()
-        tone_padded.zero_()
-        language_padded.zero_()
+        mel_feature_padded = torch.FloatTensor(len(batch), batch[0][2].size(2), max_mel_feature_len)
+        
+        
+        # text_padded.zero_()
+        # tone_padded.zero_()
+        # language_padded.zero_()
         spec_padded.zero_()
         wav_padded.zero_()
-        bert_padded.zero_()
+        mel_feature_padded.zero_()
+        # bert_padded.zero_()
         # en_bert_padded.zero_()
-        emo.zero_()
+        # emo.zero_()
 
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
 
-            text = row[0]
-            text_padded[i, : text.size(0)] = text
-            text_lengths[i] = text.size(0)
-
-            spec = row[1]
+            spec = row[0]
             spec_padded[i, :, : spec.size(1)] = spec
             spec_lengths[i] = spec.size(1)
 
-            wav = row[2]
+            wav = row[1]
             wav_padded[i, :, : wav.size(1)] = wav
             wav_lengths[i] = wav.size(1)
 
-            sid[i] = row[3]
-
-            tone = row[4]
-            tone_padded[i, : tone.size(0)] = tone
-
-            language = row[5]
-            language_padded[i, : language.size(0)] = language
-
-            bert = row[6]
-            bert_padded[i, :, : bert.size(1)] = bert
-
-            # en_bert = row[7]
-            # en_bert_padded[i, :, : en_bert.size(1)] = en_bert
-
-            emo[i, :] = row[7]
+            mel_feature = row[2]
+            mel_feature_padded[i, :, : wav.size(2)] = mel_feature
+            mel_feature_lengths[i] = mel_feature.size(2)
 
         return (
-            text_padded,
-            text_lengths,
             spec_padded,
             spec_lengths,
             wav_padded,
             wav_lengths,
-            sid,
-            tone_padded,
-            language_padded,
-            bert_padded,
-            emo,
+            mel_feature,
+            mel_feature_lengths
         )
 
 
