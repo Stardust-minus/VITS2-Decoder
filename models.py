@@ -147,178 +147,85 @@ class TransformerCouplingBlock(nn.Module):
         return x
 
 
-class StochasticDurationPredictor(nn.Module):
+class MelStyleEncoder(nn.Module):
+    """MelStyleEncoder"""
+
     def __init__(
         self,
-        in_channels,
-        filter_channels,
-        kernel_size,
-        p_dropout,
-        n_flows=4,
-        gin_channels=0,
+        n_mel_channels=128,
+        style_hidden=128,
+        style_vector_dim=256,
+        style_kernel_size=5,
+        style_head=2,
+        dropout=0.1,
     ):
-        super().__init__()
-        filter_channels = in_channels  # it needs to be removed from future version.
-        self.in_channels = in_channels
-        self.filter_channels = filter_channels
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.n_flows = n_flows
-        self.gin_channels = gin_channels
+        super(MelStyleEncoder, self).__init__()
+        self.in_dim = n_mel_channels
+        self.hidden_dim = style_hidden
+        self.out_dim = style_vector_dim
+        self.kernel_size = style_kernel_size
+        self.n_head = style_head
+        self.dropout = dropout
 
-        self.log_flow = modules.Log()
-        self.flows = nn.ModuleList()
-        self.flows.append(modules.ElementwiseAffine(2))
-        for i in range(n_flows):
-            self.flows.append(
-                modules.ConvFlow(2, filter_channels, kernel_size, n_layers=3)
-            )
-            self.flows.append(modules.Flip())
-
-        self.post_pre = nn.Conv1d(1, filter_channels, 1)
-        self.post_proj = nn.Conv1d(filter_channels, filter_channels, 1)
-        self.post_convs = modules.DDSConv(
-            filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout
+        self.spectral = nn.Sequential(
+            LinearNorm(self.in_dim, self.hidden_dim),
+            Mish(),
+            nn.Dropout(self.dropout),
+            LinearNorm(self.hidden_dim, self.hidden_dim),
+            Mish(),
+            nn.Dropout(self.dropout),
         )
-        self.post_flows = nn.ModuleList()
-        self.post_flows.append(modules.ElementwiseAffine(2))
-        for i in range(4):
-            self.post_flows.append(
-                modules.ConvFlow(2, filter_channels, kernel_size, n_layers=3)
-            )
-            self.post_flows.append(modules.Flip())
 
-        self.pre = nn.Conv1d(in_channels, filter_channels, 1)
-        self.proj = nn.Conv1d(filter_channels, filter_channels, 1)
-        self.convs = modules.DDSConv(
-            filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout
+        self.temporal = nn.Sequential(
+            Conv1dGLU(self.hidden_dim, self.hidden_dim, self.kernel_size, self.dropout),
+            Conv1dGLU(self.hidden_dim, self.hidden_dim, self.kernel_size, self.dropout),
         )
-        if gin_channels != 0:
-            self.cond = nn.Conv1d(gin_channels, filter_channels, 1)
 
-    def forward(self, x, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
-        x = torch.detach(x)
-        x = self.pre(x)
-        if g is not None:
-            g = torch.detach(g)
-            x = x + self.cond(g)
-        x = self.convs(x, x_mask)
-        x = self.proj(x) * x_mask
+        self.slf_attn = MultiHeadAttention(
+            self.n_head,
+            self.hidden_dim,
+            self.hidden_dim // self.n_head,
+            self.hidden_dim // self.n_head,
+            self.dropout,
+        )
 
-        if not reverse:
-            flows = self.flows
-            assert w is not None
+        self.fc = LinearNorm(self.hidden_dim, self.out_dim)
 
-            logdet_tot_q = 0
-            h_w = self.post_pre(w)
-            h_w = self.post_convs(h_w, x_mask)
-            h_w = self.post_proj(h_w) * x_mask
-            e_q = (
-                torch.randn(w.size(0), 2, w.size(2)).to(device=x.device, dtype=x.dtype)
-                * x_mask
-            )
-            z_q = e_q
-            for flow in self.post_flows:
-                z_q, logdet_q = flow(z_q, x_mask, g=(x + h_w))
-                logdet_tot_q += logdet_q
-            z_u, z1 = torch.split(z_q, [1, 1], 1)
-            u = torch.sigmoid(z_u) * x_mask
-            z0 = (w - u) * x_mask
-            logdet_tot_q += torch.sum(
-                (F.logsigmoid(z_u) + F.logsigmoid(-z_u)) * x_mask, [1, 2]
-            )
-            logq = (
-                torch.sum(-0.5 * (math.log(2 * math.pi) + (e_q**2)) * x_mask, [1, 2])
-                - logdet_tot_q
-            )
-
-            logdet_tot = 0
-            z0, logdet = self.log_flow(z0, x_mask)
-            logdet_tot += logdet
-            z = torch.cat([z0, z1], 1)
-            for flow in flows:
-                z, logdet = flow(z, x_mask, g=x, reverse=reverse)
-                logdet_tot = logdet_tot + logdet
-            nll = (
-                torch.sum(0.5 * (math.log(2 * math.pi) + (z**2)) * x_mask, [1, 2])
-                - logdet_tot
-            )
-            return nll + logq  # [b]
+    def temporal_avg_pool(self, x, mask=None):
+        if mask is None:
+            out = torch.mean(x, dim=1)
         else:
-            flows = list(reversed(self.flows))
-            flows = flows[:-2] + [flows[-1]]  # remove a useless vflow
-            z = (
-                torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype)
-                * noise_scale
-            )
-            for flow in flows:
-                z = flow(z, x_mask, g=x, reverse=reverse)
-            z0, z1 = torch.split(z, [1, 1], 1)
-            logw = z0
-            return logw
+            len_ = (~mask).sum(dim=1).unsqueeze(1)
+            x = x.masked_fill(mask.unsqueeze(-1), 0)
+            x = x.sum(dim=1)
+            out = torch.div(x, len_)
+        return out
 
-
-class DurationPredictor(nn.Module):
-    def __init__(
-        self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0
-    ):
-        super().__init__()
-
-        self.in_channels = in_channels
-        self.filter_channels = filter_channels
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
-
-        self.drop = nn.Dropout(p_dropout)
-        self.conv_1 = nn.Conv1d(
-            in_channels, filter_channels, kernel_size, padding=kernel_size // 2
+    def forward(self, x, mask=None):
+        x = x.transpose(1, 2)
+        if mask is not None:
+            mask = (mask.int() == 0).squeeze(1)
+        max_len = x.shape[1]
+        slf_attn_mask = (
+            mask.unsqueeze(1).expand(-1, max_len, -1) if mask is not None else None
         )
-        self.norm_1 = modules.LayerNorm(filter_channels)
-        self.conv_2 = nn.Conv1d(
-            filter_channels, filter_channels, kernel_size, padding=kernel_size // 2
-        )
-        self.norm_2 = modules.LayerNorm(filter_channels)
-        self.proj = nn.Conv1d(filter_channels, 1, 1)
 
-        if gin_channels != 0:
-            self.cond = nn.Conv1d(gin_channels, in_channels, 1)
+        # spectral
+        x = self.spectral(x)
+        # temporal
+        x = x.transpose(1, 2)
+        x = self.temporal(x)
+        x = x.transpose(1, 2)
+        # self-attention
+        if mask is not None:
+            x = x.masked_fill(mask.unsqueeze(-1), 0)
+        x, _ = self.slf_attn(x, mask=slf_attn_mask)
+        # fc
+        x = self.fc(x)
+        # temoral average pooling
+        w = self.temporal_avg_pool(x, mask=mask)
 
-    def forward(self, x, x_mask, g=None):
-        x = torch.detach(x)
-        if g is not None:
-            g = torch.detach(g)
-            x = x + self.cond(g)
-        x = self.conv_1(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_1(x)
-        x = self.drop(x)
-        x = self.conv_2(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_2(x)
-        x = self.drop(x)
-        x = self.proj(x * x_mask)
-        return x * x_mask
-
-
-class Bottleneck(nn.Sequential):
-    def __init__(self, in_dim, hidden_dim):
-        c_fc1 = nn.Linear(in_dim, hidden_dim, bias=False)
-        c_fc2 = nn.Linear(in_dim, hidden_dim, bias=False)
-        super().__init__(*[c_fc1, c_fc2])
-
-
-class Block(nn.Module):
-    def __init__(self, in_dim, hidden_dim) -> None:
-        super().__init__()
-        self.norm = nn.LayerNorm(in_dim)
-        self.mlp = MLP(in_dim, hidden_dim)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.mlp(self.norm(x))
-        return x
-
-
+        return w.unsqueeze(-1)
 class MLP(nn.Module):
     def __init__(self, in_dim, hidden_dim):
         super().__init__()
