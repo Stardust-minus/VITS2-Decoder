@@ -355,42 +355,6 @@ class TextEncoder(nn.Module):
         self.kernel_size = kernel_size
         self.p_dropout = p_dropout
         self.gin_channels = gin_channels
-        self.emb = nn.Embedding(len(symbols), hidden_channels)
-        nn.init.normal_(self.emb.weight, 0.0, hidden_channels**-0.5)
-        self.tone_emb = nn.Embedding(num_tones, hidden_channels)
-        nn.init.normal_(self.tone_emb.weight, 0.0, hidden_channels**-0.5)
-        self.language_emb = nn.Embedding(num_languages, hidden_channels)
-        nn.init.normal_(self.language_emb.weight, 0.0, hidden_channels**-0.5)
-        self.bert_proj = nn.Conv1d(1024, hidden_channels, 1)
-        #self.bert_pre_proj = nn.Conv1d(2048, 1024, 1)
-        # self.en_bert_proj = nn.Conv1d(1024, hidden_channels, 1)
-        self.in_feature_net = nn.Sequential(
-            # input is assumed to an already normalized embedding
-            nn.Linear(512, 1028, bias=False),
-            nn.GELU(),
-            nn.LayerNorm(1028),
-            *[Block(1028, 512) for _ in range(1)],
-            nn.Linear(1028, 512, bias=False),
-            # normalize before passing to VQ?
-            # nn.GELU(),
-            # nn.LayerNorm(512),
-        )
-        self.emo_vq = VectorQuantize(
-            dim=512,
-            # codebook_size=128,
-            codebook_size=256,
-            codebook_dim=16,
-            # codebook_dim=32,
-            commitment_weight=0.1,
-            decay=0.99,
-            heads=32,
-            kmeans_iters=20,
-            separate_codebook_per_head=True,
-            stochastic_sample_codes=True,
-            threshold_ema_dead_code=2,
-            use_cosine_sim = True,
-        )
-        self.out_feature_net = nn.Linear(512, hidden_channels)
 
         self.encoder = attentions.Encoder(
             hidden_channels,
@@ -402,34 +366,21 @@ class TextEncoder(nn.Module):
             gin_channels=self.gin_channels,
         )
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
+        
+        self.mel_feature_proj = nn.Conv1d(768, hidden_channels, 1)
 
-    def forward(self, x, x_lengths, tone, language, bert, emo, g=None):
-        bert_emb = self.bert_proj(bert).transpose(1, 2)
-        # en_bert_emb = self.en_bert_proj(en_bert).transpose(1, 2)
-        emo_emb = self.in_feature_net(emo)
-        emo_emb, _, loss_commit = self.emo_vq(emo_emb.unsqueeze(1))
-        loss_commit = loss_commit.mean()
-        emo_emb = self.out_feature_net(emo_emb)
-        x = (
-            self.emb(x)
-            + self.tone_emb(tone)
-            + self.language_emb(language)
-            + bert_emb
-            # + en_bert_emb
-            + emo_emb
-        ) * math.sqrt(
-            self.hidden_channels
-        )  # [b, t, h]
-        x = torch.transpose(x, 1, -1)  # [b, h, t]
-        x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
-            x.dtype
+    def forward(self, mel_feature, spec_lengths, ge=None):
+        y_mask = torch.unsqueeze(commons.sequence_mask(spec_lengths, mel_feature.size(2)), 1).to(
+            y.dtype
         )
+        y = self.mel_feature_proj(y * y_mask) * y_mask
+        y = self.encoder(y * y_mask, y_mask, g=ge)
 
-        x = self.encoder(x * x_mask, x_mask, g=g)
-        stats = self.proj(x) * x_mask
+        # x = self.encoder(y * y_mask, y_mask, g=ge)
+        stats = self.proj(y) * y_mask
 
         m, logs = torch.split(stats, self.out_channels, dim=1)
-        return x, m, logs, x_mask, loss_commit
+        return y, m, logs, y_mask,
 
 
 class ResidualCouplingBlock(nn.Module):
@@ -867,7 +818,7 @@ class SynthesizerTrn(nn.Module):
         gin_channels=256,
         use_sdp=True,
         n_flow_layer=4,
-        n_layers_trans_flow=6,
+        n_layers_trans_flow=4,
         flow_share_parameter=False,
         use_transformer_flow=True,
         **kwargs
@@ -954,152 +905,59 @@ class SynthesizerTrn(nn.Module):
                 n_flow_layer,
                 gin_channels=gin_channels,
             )
-        self.sdp = StochasticDurationPredictor(
-            hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels
+        self.ref_enc = MelStyleEncoder(
+            spec_channels, style_vector_dim=gin_channels
         )
-        self.dp = DurationPredictor(
-            hidden_channels, 256, 3, 0.5, gin_channels=gin_channels
-        )
-
-        if n_speakers >= 1:
-            self.emb_g = nn.Embedding(n_speakers, gin_channels)
-        else:
-            self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
 
     def forward(
         self,
-        x,
-        x_lengths,
+        mel_feature,
+        feature_lengths,
+        spec,
+        spec_lengths,
         y,
         y_lengths,
-        sid,
-        tone,
-        language,
-        bert,
-        emo,
     ):
-        if self.n_speakers > 0:
-            g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
-        else:
-            g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
-        x, m_p, logs_p, x_mask, loss_commit = self.enc_p(
-            x, x_lengths, tone, language, bert, emo, g=g
+        y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(
+            y.dtype
         )
-        z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
-        z_p = self.flow(z, y_mask, g=g)
-
-        with torch.no_grad():
-            # negative cross-entropy
-            s_p_sq_r = torch.exp(-2 * logs_p)  # [b, d, t]
-            neg_cent1 = torch.sum(
-                -0.5 * math.log(2 * math.pi) - logs_p, [1], keepdim=True
-            )  # [b, 1, t_s]
-            neg_cent2 = torch.matmul(
-                -0.5 * (z_p**2).transpose(1, 2), s_p_sq_r
-            )  # [b, t_t, d] x [b, d, t_s] = [b, t_t, t_s]
-            neg_cent3 = torch.matmul(
-                z_p.transpose(1, 2), (m_p * s_p_sq_r)
-            )  # [b, t_t, d] x [b, d, t_s] = [b, t_t, t_s]
-            neg_cent4 = torch.sum(
-                -0.5 * (m_p**2) * s_p_sq_r, [1], keepdim=True
-            )  # [b, 1, t_s]
-            neg_cent = neg_cent1 + neg_cent2 + neg_cent3 + neg_cent4
-            if self.use_noise_scaled_mas:
-                epsilon = (
-                    torch.std(neg_cent)
-                    * torch.randn_like(neg_cent)
-                    * self.current_mas_noise_scale
-                )
-                neg_cent = neg_cent + epsilon
-
-            attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
-            attn = (
-                monotonic_align.maximum_path(neg_cent, attn_mask.squeeze(1))
-                .unsqueeze(1)
-                .detach()
-            )
-
-        w = attn.sum(2)
-
-        l_length_sdp = self.sdp(x, x_mask, w, g=g)
-        l_length_sdp = l_length_sdp / torch.sum(x_mask)
-
-        logw_ = torch.log(w + 1e-6) * x_mask
-        logw = self.dp(x, x_mask, g=g)
-        # logw_sdp = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=1.0)
-        l_length_dp = torch.sum((logw - logw_) ** 2, [1, 2]) / torch.sum(
-            x_mask
-        )  # for averaging
-        # l_length_sdp += torch.sum((logw_sdp - logw_) ** 2, [1, 2]) / torch.sum(x_mask)
-
-        l_length = l_length_dp + l_length_sdp
-
-        # expand prior
-        m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2)
-        logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2)
+        ge = self.ref_enc(y * y_mask, y_mask)
+        x, m_p, logs_p, x_mask = self.enc_p(
+            mel_feature, spec_lengths, ge
+        )
+        z, m_q, logs_q, y_mask = self.enc_q(y, spec_lengths, g=ge)
+        z_p = self.flow(z, y_mask, g=ge)
 
         z_slice, ids_slice = commons.rand_slice_segments(
-            z, y_lengths, self.segment_size
+            z, spec_lengths, self.segment_size
         )
-        o = self.dec(z_slice, g=g)
+        o = self.dec(z_slice, g=ge)
         return (
             o,
-            l_length,
-            attn,
             ids_slice,
             x_mask,
             y_mask,
-            (z, z_p, m_p, logs_p, m_q, logs_q),
-            (x, logw, logw_),  # , logw_sdp),
-            g,
-            loss_commit,
+            (z, z_p, m_p, logs_p, m_q, logs_q)
         )
 
     def infer(
         self,
-        x,
-        x_lengths,
-        sid,
-        tone,
-        language,
-        bert,
-        emo,
-        noise_scale=0.667,
-        length_scale=1,
-        noise_scale_w=0.8,
-        max_len=None,
-        sdp_ratio=0,
-        y=None,
+        mel_feature,
+        feature_lengths,
+        spec,
+        spec_lengths
     ):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, tone, language, bert)
         # g = self.gst(y)
-        if self.n_speakers > 0:
-            g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
-        else:
-            g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
-        x, m_p, logs_p, x_mask, _ = self.enc_p(
-            x, x_lengths, tone, language, bert, emo, g=g
+        y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(
+            y.dtype
         )
-        logw = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w) * (
-            sdp_ratio
-        ) + self.dp(x, x_mask, g=g) * (1 - sdp_ratio)
-        w = torch.exp(logw) * x_mask * length_scale
-        w_ceil = torch.ceil(w)
-        y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
-        y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(
-            x_mask.dtype
+        ge = self.ref_enc(y * y_mask, y_mask)
+        
+        x, m_p, logs_p, x_mask = self.enc_p(
+            mel_feature, spec_lengths, ge
         )
-        attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
-        attn = commons.generate_path(w_ceil, attn_mask)
-
-        m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(
-            1, 2
-        )  # [b, t', t], [b, t, d] -> [b, d, t']
-        logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(
-            1, 2
-        )  # [b, t', t], [b, t, d] -> [b, d, t']
-
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-        z = self.flow(z_p, y_mask, g=g, reverse=True)
-        o = self.dec((z * y_mask)[:, :, :max_len], g=g)
+        z = self.flow(z_p, y_mask, g=ge, reverse=True)
+        o = self.dec((z * y_mask)[:, :, :max_len], g=ge)
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
