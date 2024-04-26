@@ -185,12 +185,12 @@ class TextAudioSpeakerCollate:
             mel_feature_lengths[i] = mel_feature.size(2)
 
         return (
+            mel_feature,
+            mel_feature_lengths,
             spec_padded,
             spec_lengths,
             wav_padded,
-            wav_lengths,
-            mel_feature,
-            mel_feature_lengths
+            wav_lengths
         )
 
 
