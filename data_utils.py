@@ -16,7 +16,7 @@ import torchaudio
 from fish_speech.models.vqgan.modules.wavenet import WaveNet
 from fish_speech.models.vqgan.spectrogram import LogMelSpectrogram
 from fish_speech.models.vqgan.modules.fsq import DownsampleFiniteScalarQuantize
-
+import numpy as np
 """Multi speaker version"""
 
 
@@ -91,7 +91,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         rank = rank[0] if len(rank) > 0 else 0
         gpu_id = rank % torch.cuda.device_count()
         device = f"cuda:{gpu_id}"
-        print(device)
         waveform, _ = torchaudio.load(filename, backend="sox")
         audio = waveform.float().unsqueeze(0).to(device)
 
@@ -101,6 +100,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         model.eval()
 
         decoded_mels = model(audio, audio_lengths)
+        if np.random.rand() > 0.8:
+            torch.cuda.empty_cache()
         return decoded_mels
 
     def __getitem__(self, index):
