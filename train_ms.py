@@ -742,7 +742,6 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 )
                 audio = y_hat[0, :, : y_hat_lengths[0]]
                 mos_score = predictor(audio, sr=44100)
-                100)
                 
                 image_dict.update(
                     {
