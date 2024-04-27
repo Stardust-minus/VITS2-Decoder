@@ -52,22 +52,6 @@ torch.backends.cuda.enable_mem_efficient_sdp(
 global_step = 0
 
 def run():
-    # 环境变量解析
-    envs = config.train_ms_config.env
-    for env_name, env_value in envs.items():
-        if env_name not in os.environ.keys():
-            print("加载config中的配置{}".format(str(env_value)))
-            os.environ[env_name] = str(env_value)
-    print(
-        "加载环境变量 \nMASTER_ADDR: {},\nMASTER_PORT: {},\nWORLD_SIZE: {},\nRANK: {},\nLOCAL_RANK: {}".format(
-            os.environ["MASTER_ADDR"],
-            os.environ["MASTER_PORT"],
-            os.environ["WORLD_SIZE"],
-            os.environ["RANK"],
-            os.environ["LOCAL_RANK"],
-        )
-    )
-
     backend = "nccl"
     if platform.system() == "Windows":
         backend = "gloo"  # If Windows,switch to gloo backend.
@@ -142,7 +126,7 @@ def run():
         collate_fn=collate_fn,
         batch_sampler=train_sampler,
         persistent_workers=True,
-        prefetch_factor=8,
+        prefetch_factor=16,
     )  # DataLoader config could be adjusted.
     if rank == 0:
         eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps.data)
@@ -560,7 +544,9 @@ def train_and_evaluate(
         scaler.update()
 
         if rank == 0:
+            print("11")
             if global_step % hps.train.log_interval == 0:
+                print("111")
                 lr = optim_g.param_groups[0]["lr"]
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_kl]
                 logger.info(
