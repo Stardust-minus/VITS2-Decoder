@@ -536,8 +536,6 @@ def train_and_evaluate(
                 loss_lm_gen = wl.generator(y_hat.squeeze())
             with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
                 loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
-                print(logs_q.shape)
-                print(logs_p.shape)
                 loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
 
                 loss_fm = feature_loss(fmap_r, fmap_g)
