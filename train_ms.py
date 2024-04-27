@@ -69,7 +69,7 @@ def run(rank, n_gpus, hps):
     dist.init_process_group(backend='nccl', init_method='env://', world_size=n_gpus, rank=rank)
     torch.manual_seed(hps.train.seed)
     torch.cuda.set_device(rank)
-
+    local_rank = rank
     # 命令行/config.yml配置解析
     # hps = utils.get_hparams()
     parser = argparse.ArgumentParser()
