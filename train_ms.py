@@ -50,35 +50,24 @@ torch.backends.cuda.enable_mem_efficient_sdp(
 )  # Not available if torch version is lower than 2.0
 global_step = 0
 
+def main():
+  """Assume Single Node Multi GPUs Training Only"""
+  assert torch.cuda.is_available(), "CPU training is not allowed."
 
-def run():
-    # 环境变量解析
-    envs = config.train_ms_config.env
-    for env_name, env_value in envs.items():
-        if env_name not in os.environ.keys():
-            print("加载config中的配置{}".format(str(env_value)))
-            os.environ[env_name] = str(env_value)
-    print(
-        "加载环境变量 \nMASTER_ADDR: {},\nMASTER_PORT: {},\nWORLD_SIZE: {},\nRANK: {},\nLOCAL_RANK: {}".format(
-            os.environ["MASTER_ADDR"],
-            os.environ["MASTER_PORT"],
-            os.environ["WORLD_SIZE"],
-            os.environ["RANK"],
-            os.environ["LOCAL_RANK"],
-        )
-    )
+  n_gpus = torch.cuda.device_count()
+  os.environ['MASTER_ADDR'] = 'localhost'
+  os.environ['MASTER_PORT'] = '65280'
 
+  hps = utils.get_hparams()
+  mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
+
+def run(rank, n_gpus, hps):
     backend = "nccl"
     if platform.system() == "Windows":
         backend = "gloo"  # If Windows,switch to gloo backend.
-    dist.init_process_group(
-        backend=backend,
-        init_method="env://",
-        timeout=datetime.timedelta(seconds=300),
-    )  # Use torchrun instead of mp.spawn
-    rank = dist.get_rank()
-    local_rank = int(os.environ["LOCAL_RANK"])
-    n_gpus = dist.get_world_size()
+    dist.init_process_group(backend='nccl', init_method='env://', world_size=n_gpus, rank=rank)
+    torch.manual_seed(hps.train.seed)
+    torch.cuda.set_device(rank)
 
     # 命令行/config.yml配置解析
     # hps = utils.get_hparams()
@@ -113,9 +102,6 @@ def run():
             data = f.read()
         with open(config.train_ms_config.config_path, "w", encoding="utf-8") as f:
             f.write(data)
-
-    torch.manual_seed(hps.train.seed)
-    torch.cuda.set_device(local_rank)
 
     global global_step
     if rank == 0:
