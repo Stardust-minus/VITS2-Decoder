@@ -684,7 +684,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     generator.eval()
     image_dict = {}
     audio_dict = {}
+    scores = []
     print("Evaluating ...")
+    predictor = torch.hub.load(
+    "tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True).cuda()
     with torch.no_grad():
         for batch_idx, (
             mel_feature,
@@ -724,6 +727,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                     hps.data.mel_fmin,
                     hps.data.mel_fmax,
                 )
+                audio = y_hat[0, :, : y_hat_lengths[0]]
+                mos_score = predictor(audio, sr=44100)
+                100)
+                
                 image_dict.update(
                     {
                         f"gen/mel_{batch_idx}": utils.plot_spectrogram_to_numpy(
@@ -746,7 +753,8 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                     }
                 )
                 audio_dict.update({f"gt/audio_{batch_idx}": y[0, :, : y_lengths[0]]})
-
+    average_score = sum(scores) / len(scores)
+    scalar_dict = {"val/mos": average_score}
     utils.summarize(
         writer=writer_eval,
         global_step=global_step,
