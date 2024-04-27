@@ -10,6 +10,7 @@ from mel_processing import spectrogram_torch, mel_spectrogram_torch
 from utils import load_audio, load_filepaths_and_text
 from text import cleaned_text_to_sequence
 from config import config
+from models import VQVAE
 import torchaudio
 from fish_speech.models.vqgan.modules.wavenet import WaveNet
 from fish_speech.models.vqgan.spectrogram import LogMelSpectrogram
