@@ -442,7 +442,7 @@ class TextEncoder(nn.Module):
             mel_feature.dtype
         )        
         y = self.mel_feature_proj(mel_feature * y_mask) * y_mask
-        y = self.encoder(y * y_mask, y_mask)
+        y = self.encoder(y * y_mask, y_mask, g=ge)
         # x = self.encoder(y * y_mask, y_mask, g=ge)
         stats = self.proj(y) * y_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
