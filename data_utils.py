@@ -63,8 +63,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         for audiopath, _, _, _ in tqdm(
             self.audiopaths_sid_text
         ):
-            # audiopath = f"{_id}"
-            # mel_feature_path = os.path.splitext(audio_path)[0] + '.pt'
             audiopaths_sid_text_new.append([audiopath])
             lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
         self.audiopaths_sid_text = audiopaths_sid_text_new
@@ -73,10 +71,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         # separate filename, speaker_id and text
         audiopath = audiopath_sid_text[0]
-        # print(audiopath)
-        # print(len(audiopath))
         spec, wav = self.get_audio(audiopath)
-        # mel_feature = torchaudio.load(mel_feature_path)
         mel_feature = self.get_mel_feature(audiopath)
         return (spec, wav, mel_feature)
 
@@ -92,6 +87,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
     def get_mel_feature(self, filename):
         device = torch.cuda.current_device()
+        print(device)
         waveform, _ = torchaudio.load(filename, backend="sox")
         audio = waveform.float().unsqueeze(0).to(device)
 
