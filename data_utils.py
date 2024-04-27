@@ -77,7 +77,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # print(len(audiopath))
         spec, wav = self.get_audio(audiopath)
         # mel_feature = torchaudio.load(mel_feature_path)
-        mel_feature = get_mel_feature(audiopath)
+        mel_feature = self.get_mel_feature(audiopath)
         return (spec, wav, mel_feature)
 
     def get_audio(self, filename):
@@ -89,6 +89,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                                   center=False)
         spec = torch.squeeze(spec, 0)
         return spec, audio_norm
+        
     def get_mel_feature(self, filename):
         waveform, _ = torchaudio.load(audio_path, backend="sox")
         audio = waveform.float().unsqueeze(0).to(device)
