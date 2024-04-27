@@ -778,4 +778,4 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
 
 if __name__ == "__main__":
-    main()
+    run()
