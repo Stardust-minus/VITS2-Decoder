@@ -142,7 +142,7 @@ def run():
         collate_fn=collate_fn,
         batch_sampler=train_sampler,
         persistent_workers=True,
-        prefetch_factor=6,
+        prefetch_factor=8,
     )  # DataLoader config could be adjusted.
     if rank == 0:
         eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps.data)
@@ -227,8 +227,8 @@ def run():
         )
     else:
         optim_wd = None
-    net_g = DDP(net_g, device_ids=[local_rank], bucket_cap_mb=512)
-    net_d = DDP(net_d, device_ids=[local_rank], bucket_cap_mb=512)
+    net_g = DDP(net_g, device_ids=[local_rank], bucket_cap_mb=512, find_unused_parameters=True)
+    net_d = DDP(net_d, device_ids=[local_rank], bucket_cap_mb=512, find_unused_parameters=True)
     if net_dur_disc is not None:
         net_dur_disc = DDP(
             net_dur_disc,
