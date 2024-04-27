@@ -165,7 +165,6 @@ class TextAudioSpeakerCollate:
             row = batch[ids_sorted_decreasing[i]]
 
             spec = row[0]
-            print(spec.shape)
             spec_padded[i, :, : spec.size(1)] = spec
             spec_lengths[i] = spec.size(1)
 
@@ -174,9 +173,9 @@ class TextAudioSpeakerCollate:
             wav_lengths[i] = wav.size(1)
 
             mel_feature = row[2]
-            print(mel_feature.shape)
             mel_feature_padded[i, :, : mel_feature.size(2)] = mel_feature
             mel_feature_lengths[i] = mel_feature.size(2)
+            assert spec_padded.size(1) == mel_feature_padded.size(2)
 
         return (
             mel_feature_padded,
