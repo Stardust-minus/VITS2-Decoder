@@ -19,6 +19,8 @@ from fish_speech.models.vqgan.modules.fsq import DownsampleFiniteScalarQuantize
 import numpy as np
 """Multi speaker version"""
 
+vq_model = VQVAE(use_decoder=False)
+vq_model.eval()
 
 class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     """
@@ -95,13 +97,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if waveform.shape[0] > 1:  # Check if the audio is not mono
             waveform = torch.mean(waveform, dim=0, keepdim=True)
         audio = waveform.float().unsqueeze(0)
-
         # 获取音频长度
         audio_lengths = torch.tensor([audio.shape[1]])
-        model = VQVAE(use_decoder=False)
-        model.eval()
 
-        decoded_mels = model(audio, audio_lengths)
+        decoded_mels = vq_model(audio, audio_lengths)
         if np.random.rand() > 0.8:
             torch.cuda.empty_cache()
         return decoded_mels
