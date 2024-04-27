@@ -90,15 +90,15 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         rank = mp.current_process()._identity
         rank = rank[0] if len(rank) > 0 else 0
         gpu_id = rank % torch.cuda.device_count()
-        device = f"cuda:{gpu_id}"
+        #device = f"cuda:{gpu_id}"
         waveform, _ = torchaudio.load(filename, backend="sox")
         if waveform.shape[0] > 1:  # Check if the audio is not mono
             waveform = torch.mean(waveform, dim=0, keepdim=True)
-        audio = waveform.float().unsqueeze(0).to(device)
+        audio = waveform.float().unsqueeze(0)
 
         # 获取音频长度
-        audio_lengths = torch.tensor([audio.shape[1]]).to(device)
-        model = VQVAE(use_decoder=False, device=device).to(device)
+        audio_lengths = torch.tensor([audio.shape[1]])
+        model = VQVAE(use_decoder=False, device=device)
         model.eval()
 
         decoded_mels = model(audio, audio_lengths)
