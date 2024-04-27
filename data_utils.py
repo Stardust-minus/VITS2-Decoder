@@ -64,15 +64,15 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             self.audiopaths_sid_text
         ):
             # audiopath = f"{_id}"
-            mel_feature_path = os.path.splitext(audio_path)[0] + '.pt'
-            audiopaths_sid_text_new.append([audiopath, mel_feature_path])
+            # mel_feature_path = os.path.splitext(audio_path)[0] + '.pt'
+            audiopaths_sid_text_new.append([audiopath])
             lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
         self.audiopaths_sid_text = audiopaths_sid_text_new
         self.lengths = lengths
 
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         # separate filename, speaker_id and text
-        audiopath, mel_feature_path = audiopath_sid_text
+        audiopath = audiopath_sid_text
         spec, wav = self.get_audio(audiopath)
         # mel_feature = torchaudio.load(mel_feature_path)
         mel_feature = get_mel_feature(audiopath)
