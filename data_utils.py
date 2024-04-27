@@ -73,7 +73,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audiopath = audiopath_sid_text[0]
         spec, wav = self.get_audio(audiopath)
         mel_feature_path = audiopath.split(".")[0] + ".pt"
-        mel_feature = torch.load(mel_feature_path)
+        mel_feature = torch.load(mel_feature_path, map_location=torch.device('cpu'))
         return (spec, wav, mel_feature)
 
     def get_audio(self, filename):
