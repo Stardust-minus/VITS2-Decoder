@@ -10,6 +10,8 @@ from huggingface_hub import hf_hub_download
 from scipy.io.wavfile import read
 import torch
 import re
+import ffmpeg
+import traceback
 
 MATPLOTLIB_FLAG = False
 
@@ -20,7 +22,6 @@ def load_audio(file, sr):
         # https://github.com/openai/whisper/blob/main/whisper/audio.py#L26
         # This launches a subprocess to decode audio while down-mixing and resampling as necessary.
         # Requires the ffmpeg CLI and `ffmpeg-python` package to be installed.
-        file = clean_path(file)  # 防止小白拷路径头尾带了空格和"和回车
         if os.path.exists(file) == False:
             raise RuntimeError(
                 "You input a wrong audio path that does not exists, please fix it!"
