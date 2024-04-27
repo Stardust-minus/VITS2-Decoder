@@ -289,6 +289,97 @@ class TextEncoder(nn.Module):
         m, logs = torch.split(stats, self.out_channels, dim=1)
         return y, m, logs, y_mask,
 
+class VQVAE(nn.Module):
+    def __init__(
+        self,
+        use_decoder: bool = False,
+    ):
+        super().__init__()
+        torch.set_num_threads(1)
+        self.encoder = WaveNet(
+            input_channels=128,
+            residual_channels=768,
+            residual_layers=20,
+            dilation_cycle=4,
+        )
+        #self.device = torch.device(device)
+        self.quantizer = DownsampleFiniteScalarQuantize(
+            input_dim=768, n_codebooks=1, n_groups=2, levels=[8, 5, 5, 5]
+        )
+
+        self.spec = LogMelSpectrogram(
+            sample_rate=44100,
+            n_fft=2048,
+            win_length=2048,
+            hop_length=512,
+            n_mels=128,
+            f_min=0.0,
+            f_max=8000.0,
+        )
+        self.use_decoder = use_decoder
+
+        if use_decoder:
+            self.decoder = WaveNet(
+                output_channels=128,
+                residual_channels=768,
+                residual_layers=20,
+                dilation_cycle=4,
+                condition_channels=768,
+            )
+
+            # A simple linear layer to project quality to condition channels
+            self.quality_projection = nn.Linear(1, 768)
+
+        self.eval()
+        checkpoint = torch.load("/g03_ssd/fish-speech/results/vq-gan-group-fsq-2x1024-wn-20x768-cond/checkpoints/step_000545000.ckpt")
+        model_state_dict = checkpoint['state_dict']
+        e = self.load_state_dict(
+            model_state_dict,
+            strict=False,
+        )
+
+        assert len(e.missing_keys) == 0, e.missing_keys
+        assert all(
+            k.startswith("decoder.") or 
+            k.startswith("quality_projection.") or
+            k.startswith("discriminator.")
+            for k in e.unexpected_keys
+        ), e.unexpected_keys
+
+        if use_decoder:
+            self.register_buffer(
+                "quality_embedding",
+                self.quality_projection(torch.ones(1, 1) * 2)[:, :, None],
+                persistent=False,
+            )
+
+    @torch.inference_mode()
+    def forward(self, audios, audio_lengths):
+        mel_spec = self.spec(audios)
+
+        mel_lengths = audio_lengths // self.spec.hop_length
+        mel_masks = (
+            torch.arange(mel_spec.shape[2], device=mel_spec.device)
+            < mel_lengths[:, None]
+        )
+        mel_masks_float_conv = mel_masks[:, None, :].float()
+        mels = mel_spec * mel_masks_float_conv
+
+        # Encode
+        encoded_features = self.encoder(mels) * mel_masks_float_conv
+        encoded_features = self.quantizer(encoded_features).z * mel_masks_float_conv
+
+        if self.use_decoder:
+            encoded_features = encoded_features + self.quality_embedding
+            return (
+                self.decoder(
+                    torch.randn_like(encoded_features) * mel_masks_float_conv,
+                    condition=encoded_features,
+                )
+                * mel_masks_float_conv
+            )
+
+        return encoded_features
 
 class ResidualCouplingBlock(nn.Module):
     def __init__(
