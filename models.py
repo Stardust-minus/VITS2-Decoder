@@ -438,8 +438,8 @@ class TextEncoder(nn.Module):
         self.mel_feature_proj = nn.Conv1d(768, hidden_channels, 1)
 
     def forward(self, mel_feature, spec_lengths, ge=None):
-        y_mask = torch.unsqueeze(commons.sequence_mask(spec_lengths, mel_feature.size(2)), 1).to(
-            y.dtype
+        y_mask = torch.unsqueeze(commons.sequence_mask(mel_feature, spec_lengths.size(2)), 1).to(
+            mel_feature.dtype
         )
         y = self.mel_feature_proj(y * y_mask) * y_mask
         y = self.encoder(y * y_mask, y_mask, g=ge)
@@ -448,7 +448,7 @@ class TextEncoder(nn.Module):
         stats = self.proj(y) * y_mask
 
         m, logs = torch.split(stats, self.out_channels, dim=1)
-        return y, m, logs, y_mask,
+        return y, m, logs, y_mask
 
 class VQVAE(nn.Module):
     def __init__(
@@ -1079,7 +1079,7 @@ class SynthesizerTrn(nn.Module):
         x, m_p, logs_p, x_mask = self.enc_p(
             mel_feature, spec_lengths, ge
         )
-        z, m_q, logs_q, y_mask = self.enc_q(y, spec_lengths, g=ge)
+        z, m_q, logs_q, y_mask = self.enc_q(spec, spec_lengths, g=ge)
         z_p = self.flow(z, y_mask, g=ge)
 
         z_slice, ids_slice = commons.rand_slice_segments(
