@@ -6,6 +6,7 @@ from torch import nn
 from tqdm import tqdm
 from tools.log import logger
 import commons
+import torch.multiprocessing as mp
 from mel_processing import spectrogram_torch, mel_spectrogram_torch
 from utils import load_audio, load_filepaths_and_text
 from text import cleaned_text_to_sequence
@@ -86,7 +87,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return spec, audio_norm
         
     def get_mel_feature(self, filename):
-        device = torch.cuda.current_device()
+        rank = mp.current_process()._identity
+        rank = rank[0] if len(rank) > 0 else 0
+        gpu_id = rank % torch.cuda.device_count()
+        device = f"cuda:{gpu_id}"
         print(device)
         waveform, _ = torchaudio.load(filename, backend="sox")
         audio = waveform.float().unsqueeze(0).to(device)
