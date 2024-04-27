@@ -72,7 +72,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # separate filename, speaker_id and text
         audiopath = audiopath_sid_text[0]
         spec, wav = self.get_audio(audiopath)
-        mel_feature_path = audiopath.spilt(".")[0] + ".pt"
+        mel_feature_path = audiopath.split(".")[0] + ".pt"
         mel_feature = torch.load(mel_feature_path)
         return (spec, wav, mel_feature)
 
@@ -86,23 +86,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         spec = torch.squeeze(spec, 0)
         return spec, audio_norm
         
-    def get_mel_feature(self, filename):
-        rank = mp.current_process()._identity
-        rank = rank[0] if len(rank) > 0 else 0
-        gpu_id = rank % torch.cuda.device_count()
-        #device = f"cuda:{gpu_id}"
-        waveform, _ = torchaudio.load(filename, backend="sox")
-        if waveform.shape[0] > 1:  # Check if the audio is not mono
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
-        audio = waveform.float().unsqueeze(0)
-        # 获取音频长度
-        audio_lengths = torch.tensor([audio.shape[1]])
-
-        decoded_mels = vq_model(audio, audio_lengths)
-        if np.random.rand() > 0.8:
-            torch.cuda.empty_cache()
-        return decoded_mels
-
     def __getitem__(self, index):
         return self.get_audio_text_speaker_pair(self.audiopaths_sid_text[index])
 
