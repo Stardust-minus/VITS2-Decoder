@@ -151,7 +151,7 @@ class Encoder(nn.Module):
         kernel_size=1,
         p_dropout=0.0,
         window_size=4,
-        isflow=False,
+        isflow=True,
         **kwargs
     ):
         super().__init__()
