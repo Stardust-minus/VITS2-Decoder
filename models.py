@@ -440,9 +440,9 @@ class TextEncoder(nn.Module):
     def forward(self, mel_feature, spec_lengths, ge=None):
         y_mask = torch.unsqueeze(commons.sequence_mask(spec_lengths, mel_feature.size(2)), 1).to(
             mel_feature.dtype
-        )
+        )        
+        print(mel_feature.size(2))
         y = self.mel_feature_proj(mel_feature * y_mask) * y_mask
-        print(y.shape)
         y = self.encoder(y * y_mask, y_mask)
         # x = self.encoder(y * y_mask, y_mask, g=ge)
         stats = self.proj(y) * y_mask
@@ -622,8 +622,9 @@ class PosteriorEncoder(nn.Module):
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
             x.dtype
         )
+        print(x.size(2))
         x = self.pre(x) * x_mask
-        print(x.shape)
+    
         x = self.enc(x, x_mask, g=g)
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
