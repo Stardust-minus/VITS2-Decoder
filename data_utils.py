@@ -72,7 +72,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         # separate filename, speaker_id and text
-        audiopath = audiopath_sid_text
+        audiopath = str(audiopath_sid_text)
         spec, wav = self.get_audio(audiopath)
         # mel_feature = torchaudio.load(mel_feature_path)
         mel_feature = get_mel_feature(audiopath)
