@@ -23,6 +23,15 @@ class LayerNorm(nn.Module):
         x = F.layer_norm(x, (self.channels,), self.gamma, self.beta, self.eps)
         return x.transpose(1, -1)
 
+def weight_norm_modules(module, name="weight", dim=0):
+    if isinstance(module, Depthwise_Separable_Conv1D) or isinstance(
+        module, Depthwise_Separable_TransposeConv1D
+    ):
+        module.weight_norm()
+        return module
+    else:
+        return weight_norm(module, name, dim)
+
 
 @torch.jit.script
 def fused_add_tanh_sigmoid_multiply(input_a, input_b, n_channels):
