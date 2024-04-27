@@ -796,7 +796,6 @@ class SynthesizerTrn(nn.Module):
 
     def __init__(
         self,
-        n_vocab,
         spec_channels,
         segment_size,
         inter_channels,
