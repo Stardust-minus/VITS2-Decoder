@@ -438,7 +438,7 @@ class TextEncoder(nn.Module):
         self.mel_feature_proj = nn.Conv1d(768, hidden_channels, 1)
 
     def forward(self, mel_feature, spec_lengths, ge=None):
-        y_mask = torch.unsqueeze(commons.sequence_mask(mel_feature, spec_lengths.size(2)), 1).to(
+        y_mask = torch.unsqueeze(commons.sequence_mask(spec_lengths, mel_feature.size(2)), 1).to(
             mel_feature.dtype
         )
         y = self.mel_feature_proj(y * y_mask) * y_mask
