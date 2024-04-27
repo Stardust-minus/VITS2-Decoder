@@ -242,7 +242,6 @@ class MLP(nn.Module):
 class TextEncoder(nn.Module):
     def __init__(
         self,
-        n_vocab,
         out_channels,
         hidden_channels,
         filter_channels,
@@ -253,7 +252,6 @@ class TextEncoder(nn.Module):
         gin_channels=0,
     ):
         super().__init__()
-        self.n_vocab = n_vocab
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels
         self.filter_channels = filter_channels
@@ -821,7 +819,6 @@ class SynthesizerTrn(nn.Module):
         **kwargs
     ):
         super().__init__()
-        self.n_vocab = n_vocab
         self.spec_channels = spec_channels
         self.inter_channels = inter_channels
         self.hidden_channels = hidden_channels
@@ -851,7 +848,6 @@ class SynthesizerTrn(nn.Module):
         if self.use_spk_conditioned_encoder and gin_channels > 0:
             self.enc_gin_channels = gin_channels
         self.enc_p = TextEncoder(
-            n_vocab,
             inter_channels,
             hidden_channels,
             filter_channels,
