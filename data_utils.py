@@ -97,7 +97,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         # 获取音频长度
         audio_lengths = torch.tensor([audio.shape[1]]).to(device)
-        model = VQVAE(use_decoder=False).to(device)
+        model = VQVAE(use_decoder=False, device=device).to(device)
         model.eval()
 
         decoded_mels = model(audio, audio_lengths)
