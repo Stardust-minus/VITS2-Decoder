@@ -211,7 +211,7 @@ def run():
         )
     else:
         optim_wd = None
-    net_g = DDP(net_g, device_ids=[local_rank], bucket_cap_mb=512, find_unused_parameters=True)
+    net_g = DDP(net_g, device_ids=[local_rank], bucket_cap_mb=512)
     net_d = DDP(net_d, device_ids=[local_rank], bucket_cap_mb=512)
     if net_dur_disc is not None:
         net_dur_disc = DDP(
