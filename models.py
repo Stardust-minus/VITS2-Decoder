@@ -442,8 +442,8 @@ class TextEncoder(nn.Module):
             mel_feature.dtype
         )
         y = self.mel_feature_proj(mel_feature * y_mask) * y_mask
-        y = self.encoder(y * y_mask, y_mask)
         print(y.shape)
+        y = self.encoder(y * y_mask, y_mask)
         # x = self.encoder(y * y_mask, y_mask, g=ge)
         stats = self.proj(y) * y_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
@@ -623,8 +623,8 @@ class PosteriorEncoder(nn.Module):
             x.dtype
         )
         x = self.pre(x) * x_mask
-        x = self.enc(x, x_mask, g=g)
         print(x.shape)
+        x = self.enc(x, x_mask, g=g)
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
         z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
