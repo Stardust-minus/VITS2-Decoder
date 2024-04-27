@@ -544,9 +544,7 @@ def train_and_evaluate(
         scaler.update()
 
         if rank == 0:
-            print("11")
             if global_step % hps.train.log_interval == 0:
-                print("111")
                 lr = optim_g.param_groups[0]["lr"]
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_kl]
                 logger.info(
