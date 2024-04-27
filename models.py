@@ -1071,11 +1071,9 @@ class SynthesizerTrn(nn.Module):
         feature_lengths,
         spec,
         spec_lengths,
-        y,
-        y_lengths,
     ):
-        y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(
-            y.dtype
+        y_mask = torch.unsqueeze(commons.sequence_mask(spec_lengths, spec.size(2)), 1).to(
+            spec.dtype
         )
         ge = self.ref_enc(y * y_mask, y_mask)
         x, m_p, logs_p, x_mask = self.enc_p(
