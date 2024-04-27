@@ -2,6 +2,7 @@ import os
 import random
 import torch
 import torch.utils.data
+from torch import nn
 from tqdm import tqdm
 from tools.log import logger
 import commons
@@ -9,6 +10,10 @@ from mel_processing import spectrogram_torch, mel_spectrogram_torch
 from utils import load_audio, load_filepaths_and_text
 from text import cleaned_text_to_sequence
 from config import config
+import torchaudio
+from fish_speech.models.vqgan.modules.wavenet import WaveNet
+from fish_speech.models.vqgan.spectrogram import LogMelSpectrogram
+from fish_speech.models.vqgan.modules.fsq import DownsampleFiniteScalarQuantize
 
 """Multi speaker version"""
 
@@ -68,7 +73,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # separate filename, speaker_id and text
         audiopath, mel_feature_path = audiopath_sid_text
         spec, wav = self.get_audio(audiopath)
-        mel_feature = torchaudio.load(mel_feature_path)
+        # mel_feature = torchaudio.load(mel_feature_path)
+        mel_feature = get_mel_feature(audiopath)
         return (spec, wav, mel_feature)
 
     def get_audio(self, filename):
@@ -80,6 +86,17 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                                   center=False)
         spec = torch.squeeze(spec, 0)
         return spec, audio_norm
+    def get_mel_feature(self, filename):
+        waveform, _ = torchaudio.load(audio_path, backend="sox")
+        audio = waveform.float().unsqueeze(0).to(device)
+
+        # 获取音频长度
+        audio_lengths = torch.tensor([audio.shape[1]]).to(device)
+        model = VQVAE(use_decoder=False, device=device).to(device)
+        model.eval()
+
+        decoded_mels = model(audio, audio_lengths)
+        return decoded_mels
 
     def __getitem__(self, index):
         return self.get_audio_text_speaker_pair(self.audiopaths_sid_text[index])
