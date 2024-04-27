@@ -128,7 +128,7 @@ class TextAudioSpeakerCollate:
         )
         
         max_spec_len = max([x[0].size(1) for x in batch])
-        max_wav_len = max([len(x[1]) for x in batch])
+        max_wav_len = max([x[1].size(1) for x in batch])
         max_mel_feature_len = max([x[2].size(2) for x in batch])
 
         # text_lengths = torch.LongTensor(len(batch))
