@@ -92,6 +92,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         gpu_id = rank % torch.cuda.device_count()
         device = f"cuda:{gpu_id}"
         waveform, _ = torchaudio.load(filename, backend="sox")
+        if waveform.shape[0] > 1:  # Check if the audio is not mono
+            transform = torchaudio.transforms.DownmixMono()  # Initialize the DownmixMono transform
+            waveform = transform(waveform)
         audio = waveform.float().unsqueeze(0).to(device)
 
         # 获取音频长度
