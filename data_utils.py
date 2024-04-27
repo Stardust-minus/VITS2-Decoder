@@ -91,12 +91,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return spec, audio_norm
         
     def get_mel_feature(self, filename):
-        waveform, _ = torchaudio.load(audio_path, backend="sox")
-        audio = waveform.float().unsqueeze(0).to(device)
+        waveform, _ = torchaudio.load(filename, backend="sox")
+        audio = waveform.float().unsqueeze(0)
 
         # 获取音频长度
-        audio_lengths = torch.tensor([audio.shape[1]]).to(device)
-        model = VQVAE(use_decoder=False, device=device).to(device)
+        audio_lengths = torch.tensor([audio.shape[1]])
+        model = VQVAE(use_decoder=False, device=device)
         model.eval()
 
         decoded_mels = model(audio, audio_lengths)
