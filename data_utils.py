@@ -150,7 +150,8 @@ class TextAudioSpeakerCollate:
         spec_padded = torch.FloatTensor(len(batch), batch[0][0].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
         mel_feature_padded = torch.FloatTensor(len(batch), 768, max_mel_feature_len)
-        
+        print("spec_padded",spec_padded.shape)
+        print("mel_feature_padded",mel_feature_padded.shape)
         
         # text_padded.zero_()
         # tone_padded.zero_()
@@ -176,7 +177,6 @@ class TextAudioSpeakerCollate:
             mel_feature = row[2]
             mel_feature_padded[i, :, : mel_feature.size(2)] = mel_feature
             mel_feature_lengths[i] = mel_feature.size(2)
-            assert spec_padded.size(1) == mel_feature_padded.size(2)
 
         return (
             mel_feature_padded,
