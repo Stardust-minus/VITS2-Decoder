@@ -156,17 +156,6 @@ def run():
             collate_fn=collate_fn,
         )
     if (
-        "use_noise_scaled_mas" in hps.model.keys()
-        and hps.model.use_noise_scaled_mas is True
-    ):
-        print("Using noise scaled MAS for VITS2")
-        mas_noise_scale_initial = 0.01
-        noise_scale_delta = 2e-6
-    else:
-        print("Using normal MAS for VITS1")
-        mas_noise_scale_initial = 0.0
-        noise_scale_delta = 0.0
-    if (
         "use_duration_discriminator" in hps.model.keys()
         and hps.model.use_duration_discriminator is True
     ):
