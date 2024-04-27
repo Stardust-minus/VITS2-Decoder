@@ -491,7 +491,7 @@ class VQVAE(nn.Module):
             self.quality_projection = nn.Linear(1, 768)
 
         self.eval()
-        checkpoint = torch.load("/g03_ssd/fish-speech/results/vq-gan-group-fsq-2x1024-wn-20x768-cond/checkpoints/step_000545000.ckpt", map_location=self.device)
+        checkpoint = torch.load("/g03_ssd/fish-speech/results/vq-gan-group-fsq-2x1024-wn-20x768-cond/checkpoints/step_000545000.ckpt", map_location="cpu")
         model_state_dict = checkpoint['state_dict']
         e = self.load_state_dict(
             model_state_dict,
