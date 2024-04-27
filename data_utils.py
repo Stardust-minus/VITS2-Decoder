@@ -19,9 +19,6 @@ from fish_speech.models.vqgan.modules.fsq import DownsampleFiniteScalarQuantize
 import numpy as np
 """Multi speaker version"""
 
-vq_model = VQVAE(use_decoder=False)
-vq_model.eval()
-
 class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     """
     1) loads audio, speaker_id, text pairs
@@ -75,7 +72,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # separate filename, speaker_id and text
         audiopath = audiopath_sid_text[0]
         spec, wav = self.get_audio(audiopath)
-        mel_feature = self.get_mel_feature(audiopath)
+        mel_feature_path = audiopath.spilt(".")[0] + ".pt"
+        mel_feature = torch.load(mel_feature_path)
         return (spec, wav, mel_feature)
 
     def get_audio(self, filename):
