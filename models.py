@@ -441,7 +441,6 @@ class TextEncoder(nn.Module):
         y_mask = torch.unsqueeze(commons.sequence_mask(spec_lengths, mel_feature.size(2)), 1).to(
             mel_feature.dtype
         )        
-        print(mel_feature.size(2))
         y = self.mel_feature_proj(mel_feature * y_mask) * y_mask
         y = self.encoder(y * y_mask, y_mask)
         # x = self.encoder(y * y_mask, y_mask, g=ge)
@@ -622,9 +621,7 @@ class PosteriorEncoder(nn.Module):
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
             x.dtype
         )
-        print(x.size(2))
         x = self.pre(x) * x_mask
-    
         x = self.enc(x, x_mask, g=g)
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
@@ -1078,6 +1075,10 @@ class SynthesizerTrn(nn.Module):
         y_mask = torch.unsqueeze(commons.sequence_mask(spec_lengths, spec.size(2)), 1).to(
             spec.dtype
         )
+        print("mel_feature shape is",mel_feature.shape)
+        print("spec shape is",spec.shape)
+        print("feature_lengths is ",feature_lengths.shape)
+        print("spec_lengths is ",spec_lengths.shape)
         ge = self.ref_enc(spec * y_mask, y_mask)
         x, m_p, logs_p, x_mask = self.enc_p(
             mel_feature, spec_lengths, ge
