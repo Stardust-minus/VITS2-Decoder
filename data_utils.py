@@ -171,7 +171,7 @@ class TextAudioSpeakerCollate:
             wav_lengths[i] = wav.size(1)
 
             mel_feature = row[2]
-            mel_feature_padded[i, :, : wav.size(2)] = mel_feature
+            mel_feature_padded[i, :, : mel_feature.size(2)] = mel_feature
             mel_feature_lengths[i] = mel_feature.size(2)
 
         return (
